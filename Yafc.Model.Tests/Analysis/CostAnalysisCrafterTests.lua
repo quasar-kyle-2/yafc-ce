@@ -72,15 +72,14 @@ data = {
     },
     ["assembling-machine"] = {
       gatherer = crafter("gatherer", "crafting", "1kW", { type = "void" }),
-      -- 500 MJ and 2000 MJ per craft, on both sides of the 1000 MJ that a recipe with a heat-powered crafter is charged.
+      -- 500 MJ and 2000 MJ per craft.
       ["modest-furnace"] = crafter("modest-furnace", "modest", "500MW", burner()),
       ["hungry-furnace"] = crafter("hungry-furnace", "hungry", "2000MW", burner()),
-      -- 20 tiles wide, above the size of 15 that a recipe with a heat-powered crafter is charged.
+      -- 20 tiles wide.
       ["huge-assembler"] = crafter("huge-assembler", "huge", "1kW", { type = "void" }, 20),
       -- Without emissions, and with 5 pollution per minute (a number, since the tests read the data as Factorio 1.1).
       ["clean-assembler"] = crafter("clean-assembler", "clean", "1kW", { type = "void" }),
       ["dirty-furnace"] = crafter("dirty-furnace", "dirty", "1MW", burner(5)),
-      -- Its energy and size are small, so that the test can tell them from the values the recipe is charged instead.
       ["heated-assembler"] = crafter("heated-assembler", "heated", "1kW", { type = "heat", max_temperature = 500 }),
     },
     reactor = {

@@ -12,10 +12,13 @@ public class CostAnalysisCrafterTests {
     [Fact]
     public void CostAnalysis_CountsEnergyAbove1000MJ() {
         _ = LuaDependentTestHelper.GetProjectForLua("Yafc.Model.Tests.Analysis.CostAnalysisCrafterTests.lua");
-        var costs = CostAnalysis.Instance.recipeCost;
+        var costs = CostAnalysis.Instance.cost;
+        float woodCost = costs[Database.objectsByTypeName["Item.wood"]];
 
-        Assert.Equal(SmallCrafterCost + (0.1f * 500), costs[GetRecipe("modest")], 1e-3f);
-        Assert.Equal(SmallCrafterCost + (0.1f * 2000), costs[GetRecipe("hungry")], 1e-3f);
+        // These burners use only wood (2 MJ), so the wood pays for the energy, without the flat energy cost on top.
+        Assert.Equal(SmallCrafterCost, CostAnalysis.Instance.recipeCost[GetRecipe("modest")], 1e-3f);
+        Assert.Equal(SmallCrafterCost + (250 * woodCost), costs[Database.objectsByTypeName["Item.modest"]], 1e-1f);
+        Assert.Equal(SmallCrafterCost + (1000 * woodCost), costs[Database.objectsByTypeName["Item.hungry"]], 1e-1f);
     }
 
     [Fact]
@@ -33,14 +36,14 @@ public class CostAnalysisCrafterTests {
         var costs = CostAnalysis.Instance.recipeCost;
 
         Assert.Equal(SmallCrafterCost, costs[GetRecipe("clean")], 1e-3f);
-        Assert.Equal(SmallCrafterCost + (0.1f * 1) + (5 * 0.01f), costs[GetRecipe("dirty")], 1e-3f);
+        Assert.Equal(SmallCrafterCost + (5 * 0.01f), costs[GetRecipe("dirty")], 1e-3f);
     }
 
     [Fact]
-    public void CostAnalysis_HeatPoweredCrafter_GetsFixedEnergyAndSize() {
+    public void CostAnalysis_HeatPoweredCrafter_UsesItsRealEnergyAndSize() {
         _ = LuaDependentTestHelper.GetProjectForLua("Yafc.Model.Tests.Analysis.CostAnalysisCrafterTests.lua");
 
-        // The crafter is 3 wide and uses 1 kW, but its recipe is charged 15 tiles and 1000 MJ.
-        Assert.Equal((0.1f * 15 * 1.2f) + (0.1f * 1000) + 0.02f, CostAnalysis.Instance.recipeCost[GetRecipe("heated")], 1e-3f);
+        // The crafter is 3 wide and uses 1 kW, which is 0.001 MJ per craft.
+        Assert.Equal(SmallCrafterCost + (0.1f * 0.001f), CostAnalysis.Instance.recipeCost[GetRecipe("heated")], 1e-3f);
     }
 }

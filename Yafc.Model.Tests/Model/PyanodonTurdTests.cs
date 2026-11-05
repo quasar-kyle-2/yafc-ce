@@ -93,13 +93,14 @@ public class PyanodonTurdTests {
     }
 
     [Fact]
-    public void CostAnalysis_TimeCostAssumesSpeed1_LikeOtherBuildings() {
+    public void CostAnalysis_TimeCostUsesTheRealSpeed() {
         _ = LuaDependentTestHelper.GetProjectForLua();
         var costs = CostAnalysis.Instance.recipeCost;
 
-        // Both take 60 s at 1 MW. The plain greenhouse runs at speed 0.5 and uses 120 MJ, the moondrop greenhouse runs at speed 0.4 and
-        // uses 150 MJ. At 0.1 per MJ that is a difference of 3, and the speed adds nothing to it through the time.
-        Assert.Equal(3f, costs[GetRecipe("moondrop")] - costs[GetRecipe("plain-crop")], 3);
+        // Both take 60 s. The plain greenhouse runs at speed 0.5 and takes 120 s, the moondrop greenhouse runs at speed 0.4 and takes 150 s.
+        // Those 30 s cost 0.1 per second for 3 tiles, times 1.2 for the one product. These farms use only wood, so the wood pays for the
+        // energy, which isn't part of this cost.
+        Assert.Equal(10.8f, costs[GetRecipe("moondrop")] - costs[GetRecipe("plain-crop")], 3);
     }
 
     private static void SelectTurd(Project project, string subtech) {
