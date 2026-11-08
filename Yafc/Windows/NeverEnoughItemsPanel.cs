@@ -59,7 +59,7 @@ public class NeverEnoughItemsPanel : PseudoScreen, INavigationTarget, IComparer<
                     entryStatus = EntryStatus.Special;
                 }
                 // Recipes in use have a waste of 0, but rounding can leave a tiny positive value, which must not move them down the list.
-                else if (waste > 1e-5f) {
+                else if (waste > 1e-6f) {
                     entryStatus = EntryStatus.Normal;
                 }
                 else {
