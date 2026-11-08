@@ -58,7 +58,8 @@ public class NeverEnoughItemsPanel : PseudoScreen, INavigationTarget, IComparer<
                 if (recipe.specialType != FactorioObjectSpecialType.Normal && recipeFlow <= 0.01f) {
                     entryStatus = EntryStatus.Special;
                 }
-                else if (waste > 0f) {
+                // Recipes in use have a waste of 0, but rounding can leave a tiny positive value, which must not move them down the list.
+                else if (waste > 1e-5f) {
                     entryStatus = EntryStatus.Normal;
                 }
                 else {
