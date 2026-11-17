@@ -113,13 +113,17 @@ data = {
                 ["b-basic-assembler"] = {},
                 lab = {},
                 ["flexible-furnace"] = {},
+                ["frugal-furnace"] = {},
+                ["nugget-furnace"] = {},
                 ["a-slow-assembler"] = {},
                 ["b-fast-assembler"] = {},
                 farm = {},
                 complex = {},
                 stone = {},
+                ore = {},
                 ["a-small-drill"] = {},
                 ["b-big-drill"] = {},
+                ["burner-drill"] = {},
                 ["a-small-pump"] = {},
                 ["b-big-pump"] = {},
                 tower = {},
@@ -132,6 +136,10 @@ data = {
     item = {
       wood = { type = "item", name = "wood", fuel_category = "chemical", fuel_value = "2MJ" },
       peat = { type = "item", name = "peat", fuel_category = "peat", fuel_value = "2MJ" },
+      -- As cheap to make as wood, but with 50 times the energy, so it costs far less than the flat price per MJ.
+      nugget = { type = "item", name = "nugget", fuel_category = "nugget", fuel_value = "100MJ" },
+      frugal = { type = "item", name = "frugal" },
+      nuggeted = { type = "item", name = "nuggeted" },
       mixed = { type = "item", name = "mixed" },
       pressed = { type = "item", name = "pressed" },
       ["locked-or-not"] = { type = "item", name = "locked-or-not" },
@@ -156,6 +164,7 @@ data = {
       farmed = { type = "item", name = "farmed" },
       complexed = { type = "item", name = "complexed" },
       stone = { type = "item", name = "stone" },
+      ore = { type = "item", name = "ore" },
       seed = { type = "item", name = "seed", plant_result = "tree" },
       fruit = { type = "item", name = "fruit" },
     },
@@ -178,6 +187,9 @@ data = {
       dirty = free_recipe("dirty", "dirty"),
       heated = free_recipe("heated", "heated"),
       peat = free_recipe("peat", "crafting"),
+      nugget = free_recipe("nugget", "crafting"),
+      frugal = free_recipe("frugal", "frugal"),
+      nuggeted = free_recipe("nuggeted", "nuggeted"),
       ["base-assembler"] = free_recipe("base-assembler", "crafting"),
       mixed = free_recipe("mixed", "mixed"),
       pressed = free_recipe("pressed", "pressed"),
@@ -241,6 +253,9 @@ data = {
       ["a-variant-assembler"] = placed_by(crafter("a-variant-assembler", "varied", "1kW", { type = "void" }, 1), "base-assembler"),
       -- Burns wood or peat.
       ["flexible-furnace"] = crafter("flexible-furnace", "flexible", "500MW", { type = "burner", fuel_categories = { "chemical", "peat" } }),
+      -- Burns peat or nuggets, and only nuggets.
+      ["frugal-furnace"] = crafter("frugal-furnace", "frugal", "500MW", { type = "burner", fuel_categories = { "peat", "nugget" } }),
+      ["nugget-furnace"] = sized_burner("nugget-furnace", "nuggeted", "500MW", "nugget", 3),
       -- The slow assembler is 3 wide, the fast one 5 wide and twice as fast.
       ["a-slow-assembler"] = crafter("a-slow-assembler", "speedy", "1kW", { type = "void" }),
       ["b-fast-assembler"] = with_speed(crafter("b-fast-assembler", "speedy", "1kW", { type = "void" }, 5), 2),
@@ -259,11 +274,30 @@ data = {
         -- A density of 0 can't be estimated, so mining stone gets no extra penalty.
         autoplace = { probability_expression = 0 },
       },
+      -- A density of 1 is rare, so mining ore gets a penalty of 1 + ln(30).
+      ore = {
+        type = "resource",
+        name = "ore",
+        category = "rare-solid",
+        minable = { mining_time = 1, result = "ore" },
+        autoplace = { probability_expression = "resource_autoplace_all_patches{base_density = 1}" },
+      },
     },
     ["mining-drill"] = {
       -- The small drill is 2 wide and mines at half speed. The big drill is 5 wide and 4 times as fast.
       ["a-small-drill"] = drill("a-small-drill", 0.5, 2),
       ["b-big-drill"] = drill("b-big-drill", 2, 5),
+      -- Burns only wood, 2 MJ per ore, so it burns one wood for each ore it mines.
+      ["burner-drill"] = {
+        type = "mining-drill",
+        name = "burner-drill",
+        mining_speed = 1,
+        energy_usage = "2MW",
+        energy_source = { type = "burner", fuel_categories = { "chemical" } },
+        resource_categories = { "rare-solid" },
+        vector_to_place_result = { 0, -1.85 },
+        selection_box = { { -1.5, -1.5 }, { 1.5, 1.5 } },
+      },
     },
     ["offshore-pump"] = {
       -- The small pump is 1 wide and pumps 1200 water per second. The big pump is 3 wide and twice as fast.

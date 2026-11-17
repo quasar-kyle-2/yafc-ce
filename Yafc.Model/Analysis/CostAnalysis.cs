@@ -64,6 +64,10 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
         var variables = Database.goods.CreateMapping<Variable>();
         var constraints = Database.recipes.CreateMapping<Constraint>();
 
+        // Recipes whose buildings can choose between several fuels. They pay the flat energy price in the first solve, and then the price of
+        // their cheapest fuel if that turned out higher.
+        List<(Recipe recipe, Constraint constraint, float costWithoutEnergy, float energy, Goods[] fuels)> multiFuelRecipes = [];
+
         Dictionary<Goods, float> sciencePackUsage = [];
         if (!onlyCurrentMilestones && project.preferences.targetTechnology != null) {
             itemAmountPrefix = LSs.CostAnalysisEstimatedAmountFor.L(project.preferences.targetTechnology.locName);
@@ -122,7 +126,6 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
         recipeCost = Database.recipes.CreateMapping<float>();
         flow = Database.objects.CreateMapping<float>();
         var recipeFuel = Database.recipes.CreateMapping<(Goods? fuel, float amount)>();
-        var lastVariable = Database.goods.CreateMapping<Variable>();
 
         foreach (Recipe recipe in Database.recipes.all.ExceptExcluded(this)) {
             if (!ShouldInclude(recipe)) {
@@ -133,9 +136,8 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
                 continue;
             }
 
-            // TODO incorporate fuel selection. Now just select fuel if it only uses 1 fuel
-            Goods? singleUsedFuel = null;
-            float singleUsedFuelAmount = 0f;
+            // The fuels that can pay for the recipe's energy.
+            Goods[] fuels = [];
             float emissions = float.PositiveInfinity;
             int buildingSize = int.MaxValue;
             float energyPerCraft = float.PositiveInfinity;
@@ -146,7 +148,8 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
                 // Mining assumes speed 1, since its density penalty was calibrated at speed 1. So its size, energy and pollution are
                 // each the lowest among the drills, chosen separately. Taking them from the fastest drill would charge for its size
                 // without the benefit of its speed.
-                bool fuelsDiffer = false;
+                // Only the fuels that every drill can burn are used.
+                HashSet<Goods>? sharedFuels = null;
 
                 foreach (var crafter in crafters) {
                     foreach ((_, float e) in crafter.energy.emissions) {
@@ -163,24 +166,15 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
                         energyPerCraft = energy;
                     }
 
-                    // The fuel is only added to the recipe if every crafter burns the same single fuel.
-                    if (!fuelsDiffer) {
-                        Goods[] fuels = [.. crafter.energy.fuels.Where(ShouldInclude)];
-
-                        if (fuels is [Goods fuel] && fuel.fuelValue > 0f && (singleUsedFuel == null || singleUsedFuel == fuel)) {
-                            float amount = energy / fuel.fuelValue;
-                            singleUsedFuelAmount = singleUsedFuel == null ? amount : MathF.Min(singleUsedFuelAmount, amount);
-                            singleUsedFuel = fuel;
-                        }
-                        else {
-                            fuelsDiffer = true;
-                        }
+                    if (sharedFuels == null) {
+                        sharedFuels = [.. GetFuels(crafter)];
+                    }
+                    else {
+                        sharedFuels.IntersectWith(GetFuels(crafter));
                     }
                 }
 
-                if (fuelsDiffer) {
-                    singleUsedFuel = null;
-                }
+                fuels = sharedFuels == null ? [] : [.. sharedFuels];
             }
             else if (ChooseCrafter(recipe, crafters, noneUnlocked) is (EntityCrafter crafter, float speed, float energy)) {
                 // Other recipes are priced with one building, using its speed, size, energy and pollution together.
@@ -195,12 +189,7 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
                     emissions = MathF.Min(e, emissions);
                 }
 
-                Goods[] fuels = [.. crafter.energy.fuels.Where(ShouldInclude)];
-
-                if (fuels is [Goods fuel] && fuel.fuelValue > 0f) {
-                    singleUsedFuel = fuel;
-                    singleUsedFuelAmount = energy / fuel.fuelValue;
-                }
+                fuels = GetFuels(crafter);
             }
 
             // A recipe without crafters is charged a fixed size and energy.
@@ -221,15 +210,11 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
                 emissions = 0f;
             }
 
-            if (singleUsedFuel?.isPower == true) {
-                singleUsedFuel = null;
-            }
-
             int size = Math.Max(buildingSize, (recipe.ingredients.Length + recipe.products.Length) / 2);
             float sizeUsage = CostPerSecond * craftingTime * size;
-            // When the buildings burn a single fuel, that fuel is added to the recipe below and already pays for the energy.
-            float energyCost = singleUsedFuel == null ? CostPerMj * energyPerCraft : 0f;
-            float logisticsCost = (sizeUsage * (1f + (CostPerIngredientPerSize * recipe.ingredients.Length) + (CostPerProductPerSize * recipe.products.Length))) + energyCost;
+            // Without a fuel, energy is charged at a flat price. A fuel that pays for the energy is added to the recipe below instead.
+            float energyCost = CostPerMj * energyPerCraft;
+            float logisticsCost = sizeUsage * (1f + (CostPerIngredientPerSize * recipe.ingredients.Length) + (CostPerProductPerSize * recipe.products.Length));
 
             // Special handling for spoilage recipes: cost depends on container efficiency and stack size
             // Spoilage happens in storage containers where many stacks spoil in parallel
@@ -238,34 +223,20 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
                 // Cost is based on storage space needed: time / (stackSize * slotsPerTile)
                 // This reflects that larger stacks and better containers reduce infrastructure cost
                 logisticsCost = CostPerSecond * recipe.time / (stackSize * bestContainerSlotsPerTile);
+                energyCost = 0f;
+                fuels = [];
             }
-
-            var constraint = workspaceSolver.MakeConstraint(double.NegativeInfinity, 0, recipe.name);
-            constraints[recipe] = constraint;
 
             foreach (var product in recipe.products) {
-                var var = variables[product.goods];
-                float amount = product.amount;
-                constraint.SetCoefficientCheck(var, amount, ref lastVariable[product.goods]);
-
                 if (product.goods is Item) {
-                    logisticsCost += amount * CostPerItem;
+                    logisticsCost += product.amount * CostPerItem;
                 }
                 else if (product.goods is Fluid) {
-                    logisticsCost += amount * CostPerFluid;
+                    logisticsCost += product.amount * CostPerFluid;
                 }
-            }
-
-            if (singleUsedFuel != null) {
-                var var = variables[singleUsedFuel];
-                constraint.SetCoefficientCheck(var, -singleUsedFuelAmount, ref lastVariable[singleUsedFuel]);
-                recipeFuel[recipe] = (singleUsedFuel, singleUsedFuelAmount);
             }
 
             foreach (var ingredient in recipe.ingredients) {
-                var var = variables[ingredient.goods]; // TODO split cost analysis
-                constraint.SetCoefficientCheck(var, -ingredient.amount, ref lastVariable[ingredient.goods]);
-
                 if (ingredient.goods is Item) {
                     logisticsCost += ingredient.amount * CostPerItem;
                 }
@@ -274,6 +245,9 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
                 }
             }
 
+            // Mining a rare resource multiplies the recipe's whole cost, including the fuel its drills burn.
+            float miningPenalty = 1f;
+
             if (recipe.sourceEntity != null && recipe.sourceEntity.mapGenerated) {
                 float totalMining = 0f;
 
@@ -281,7 +255,7 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
                     totalMining += product.amount;
                 }
 
-                float miningPenalty = MiningPenalty;
+                miningPenalty = MiningPenalty;
                 float totalDensity = recipe.sourceEntity.mapGenDensity / totalMining;
 
                 // A density of 0 means the density could not be estimated. Don't treat such resources as the rarest possible.
@@ -291,10 +265,38 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
                 }
 
                 logisticsCost *= miningPenalty;
+                energyCost *= miningPenalty;
             }
 
             if (emissions >= 0f) {
                 logisticsCost += emissions * CostPerPollution * craftingTime * project.settings.PollutionCostModifier;
+            }
+
+            var constraint = workspaceSolver.MakeConstraint(double.NegativeInfinity, 0, recipe.name);
+            constraints[recipe] = constraint;
+
+            void Add(Variable variable, float amount) => constraint.SetCoefficient(variable, constraint.GetCoefficient(variable) + amount);
+
+            foreach (var product in recipe.products) {
+                Add(variables[product.goods], product.amount);
+            }
+
+            foreach (var ingredient in recipe.ingredients) {
+                Add(variables[ingredient.goods], -ingredient.amount);
+            }
+
+            // A recipe whose buildings burn a single fuel burns it like an ingredient. Every other recipe pays the flat energy price for now.
+            if (fuels is [Goods fuel]) {
+                float amount = energyPerCraft * miningPenalty / fuel.fuelValue;
+                Add(variables[fuel], -amount);
+                recipeFuel[recipe] = (fuel, amount);
+            }
+            else {
+                if (fuels.Length > 1) {
+                    multiFuelRecipes.Add((recipe, constraint, logisticsCost, energyPerCraft * miningPenalty, fuels));
+                }
+
+                logisticsCost += energyCost;
             }
 
             constraint.SetUb(logisticsCost);
@@ -341,6 +343,42 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
         }
 
         var result = workspaceSolver.TrySolveWithDifferentSeeds();
+
+        // A building with a choice of fuels pays for its cheapest fuel when that costs more than the flat price. Fuel costs are only known
+        // after solving, so these recipes are priced again with the fuel costs of the first solve, and the solver runs once more. The price
+        // is fixed rather than tied to the fuels, so the solver can't raise it by moving the cost of other products onto the cheapest fuel.
+        if (multiFuelRecipes.Count > 0 && result is Solver.ResultStatus.OPTIMAL or Solver.ResultStatus.FEASIBLE) {
+            Dictionary<string, float> cheapestFuelPrice = [];
+            List<(Recipe recipe, Constraint constraint, float cost)> repriced = [];
+
+            // Read every price before changing the model, since changing it clears the solution.
+            foreach (var (recipe, constraint, costWithoutEnergy, energy, fuels) in multiFuelRecipes) {
+                string key = string.Join(",", fuels.Select(f => f.name).Order());
+
+                if (!cheapestFuelPrice.TryGetValue(key, out float price)) {
+                    price = fuels.Min(f => (float)variables[f].SolutionValue() / f.fuelValue);
+                    cheapestFuelPrice[key] = price;
+                }
+
+                if (price > CostPerMj) {
+                    repriced.Add((recipe, constraint, costWithoutEnergy + (energy * price)));
+                }
+            }
+
+            if (repriced.Count > 0) {
+                foreach (var (recipe, constraint, cost) in repriced) {
+                    constraint.SetUb(cost);
+                    export[recipe] = cost;
+                    recipeCost[recipe] = cost;
+                }
+
+                // Continuing from the first solution is only fast in unusual setups, such as an empty project with every milestone unlocked, and
+                // otherwise takes about twice as long as starting over. Starting over always takes about as long as the first solve.
+                workspaceSolver.Reset();
+                result = workspaceSolver.TrySolveWithDifferentSeeds();
+            }
+        }
+
         logger.Information("Cost analysis completed in {ElapsedTime}ms with result {result}", time.ElapsedMilliseconds, result);
         float sumImportance = 1f;
         int totalRecipes = 0;
@@ -440,6 +478,21 @@ public class CostAnalysis(bool onlyCurrentMilestones) : Analysis {
             .OrderByDescending(x => flow[x] * cost[x] * x.usages.Count(y => ShouldInclude(y) && recipeWastePercentage[y] == 0f))];
 
         workspaceSolver.Dispose();
+    }
+
+    /// <summary>
+    /// Returns the fuels that can pay for a building's energy. A building that burns items is priced with whichever of its fuels is
+    /// cheapest. A building that burns fluids can burn any fluid with a fuel value, including
+    /// byproducts that are almost free, so it's only priced with a fuel when it burns just one. Electricity is charged the flat price.
+    /// </summary>
+    private Goods[] GetFuels(EntityCrafter crafter) {
+        Goods[] fuels = [.. crafter.energy.fuels.Where(f => ShouldInclude(f) && f.fuelValue > 0f && !f.isPower)];
+
+        if (crafter.energy.type != EntityEnergyType.SolidFuel && fuels.Length > 1) {
+            return [];
+        }
+
+        return fuels;
     }
 
     /// <summary>

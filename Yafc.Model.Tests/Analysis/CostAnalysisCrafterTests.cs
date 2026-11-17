@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System;
+using System.Linq;
 using Xunit;
 
 namespace Yafc.Model.Tests;
@@ -25,12 +26,34 @@ public class CostAnalysisCrafterTests {
     [Fact]
     public void CostAnalysis_SingleFuelCrafter_PaysForTheFuelOnly() {
         _ = LuaDependentTestHelper.GetProjectForLua("Yafc.Model.Tests.Analysis.CostAnalysisCrafterTests.lua");
-        var costs = CostAnalysis.Instance.recipeCost;
+        var costs = CostAnalysis.Instance;
 
         // The wood that the furnace burns is added to the recipe, so the recipe itself has no energy cost.
-        Assert.Equal(SmallCrafterCost, costs[GetRecipe("modest")], 1e-3f);
-        // The flexible furnace can burn wood or peat, so its 500 MJ per craft are charged as energy instead.
-        Assert.Equal(SmallCrafterCost + (0.1f * 500), costs[GetRecipe("flexible")], 1e-3f);
+        Assert.Equal(SmallCrafterCost, costs.recipeCost[GetRecipe("modest")], 1e-3f);
+        // The flexible furnace can burn wood or peat, which cost more than the flat price. Its recipe pays for 250 of the cheaper one.
+        float cheapestFuel = MathF.Min(costs.cost[GetItem("wood")], costs.cost[GetItem("peat")]);
+        Assert.Equal(SmallCrafterCost + (250 * cheapestFuel), costs.recipeCost[GetRecipe("flexible")], 1e-1f);
+    }
+
+    [Fact]
+    public void CostAnalysis_MultiFuelCrafter_RecipeCostIncludesTheCheapestFuel() {
+        _ = LuaDependentTestHelper.GetProjectForLua("Yafc.Model.Tests.Analysis.CostAnalysisCrafterTests.lua");
+        var costs = CostAnalysis.Instance.cost;
+        float cheapestFuel = MathF.Min(costs[GetItem("wood")], costs[GetItem("peat")]);
+
+        // Wood and peat both have 2 MJ, so the 500 MJ per craft take 250 of whichever is cheaper.
+        Assert.Equal(SmallCrafterCost + (250 * cheapestFuel), costs[GetRecipe("flexible")], 1e-1f);
+    }
+
+    [Fact]
+    public void CostAnalysis_MultiFuelCrafter_PaysAtLeastTheFlatPrice() {
+        _ = LuaDependentTestHelper.GetProjectForLua("Yafc.Model.Tests.Analysis.CostAnalysisCrafterTests.lua");
+        var costs = CostAnalysis.Instance.cost;
+
+        // Nuggets cost far less than the flat price per MJ, so the frugal furnace, which can also burn peat, pays the flat price instead.
+        Assert.Equal(SmallCrafterCost + (0.1f * 500), costs[GetRecipe("frugal")], 1e-1f);
+        // A furnace that burns only nuggets still pays for the 5 nuggets it burns.
+        Assert.Equal(SmallCrafterCost + (5 * costs[GetItem("nugget")]), costs[GetRecipe("nuggeted")], 1e-1f);
     }
 
     [Fact]
@@ -155,6 +178,17 @@ public class CostAnalysisCrafterTests {
 
         // The size of the 2-wide drill, at speed 1. The 5-wide drill is faster, but mining doesn't use its speed or its size.
         Assert.Equal((0.1f * 2 * 1.2f) + 0.02f, CostAnalysis.Instance.recipeCost[mining], 1e-3f);
+    }
+
+    [Fact]
+    public void CostAnalysis_Mining_AppliesTheRarityPenaltyToTheFuel() {
+        _ = LuaDependentTestHelper.GetProjectForLua("Yafc.Model.Tests.Analysis.CostAnalysisCrafterTests.lua");
+        var mining = (Recipe)Database.objectsByTypeName["Mechanics.mining.rare-solid.ore"];
+        var costs = CostAnalysis.Instance;
+        float penalty = 1 + MathF.Log(30);
+
+        // The drill burns one wood per ore. The penalty for mining rare ore applies to that wood, as it does to the rest of the cost.
+        Assert.Equal(penalty * costs.cost[GetItem("wood")], costs.cost[mining] - costs.recipeCost[mining], 1e-2f);
     }
 
     [Fact]
