@@ -12,6 +12,24 @@ public static class RenderingUtils {
     public static readonly IntPtr cursorArrow = SDL.SDL_CreateSystemCursor(SDL.SDL_SystemCursor.SDL_SYSTEM_CURSOR_ARROW);
     public static readonly IntPtr cursorHand = SDL.SDL_CreateSystemCursor(SDL.SDL_SystemCursor.SDL_SYSTEM_CURSOR_HAND);
     public static readonly IntPtr cursorHorizontalResize = SDL.SDL_CreateSystemCursor(SDL.SDL_SystemCursor.SDL_SYSTEM_CURSOR_SIZEWE);
+    public static readonly IntPtr cursorWait = SDL.SDL_CreateSystemCursor(SDL.SDL_SystemCursor.SDL_SYSTEM_CURSOR_WAIT);
+
+    /// <summary>
+    /// Shows the wait (hourglass/spinner) cursor until the returned scope is disposed, then restores the previous cursor.
+    /// Use this around long work on the UI thread that has no progress window of its own.
+    /// </summary>
+    public static WaitCursorScope ShowWaitCursor() => new(SDL.SDL_GetCursor());
+
+    public readonly struct WaitCursorScope : IDisposable {
+        private readonly IntPtr previousCursor;
+
+        internal WaitCursorScope(IntPtr previousCursor) {
+            this.previousCursor = previousCursor;
+            SDL.SDL_SetCursor(cursorWait);
+        }
+
+        public void Dispose() => SDL.SDL_SetCursor(previousCursor == IntPtr.Zero ? cursorArrow : previousCursor);
+    }
     public const byte SEMITRANSPARENT = 100;
 
     private static SDL.SDL_Color ColorFromHex(int hex) => new SDL.SDL_Color { r = (byte)(hex >> 16), g = (byte)(hex >> 8), b = (byte)hex, a = 255 };

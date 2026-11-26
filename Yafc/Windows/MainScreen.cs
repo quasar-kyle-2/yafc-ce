@@ -114,7 +114,9 @@ public partial class MainScreen : WindowMain, IKeyboardFocus, IProgress<(string,
     private void ReRunAnalysis() {
         analysisUpdatePending = false;
         ErrorCollector collector = new ErrorCollector();
-        Analysis.ProcessAnalyses(this, project, collector);
+        using (RenderingUtils.ShowWaitCursor()) {
+            Analysis.ProcessAnalyses(this, project, collector);
+        }
         rootGui.MarkEverythingForRebuild();
         if (collector.severity > ErrorSeverity.None) {
             ErrorListPanel.Show(collector);
@@ -703,9 +705,11 @@ public partial class MainScreen : WindowMain, IKeyboardFocus, IProgress<(string,
 
         ErrorCollector errors = new ErrorCollector();
         try {
-            Project project = Project.ReadFromFile(path, errors, Preferences.Instance.useMostRecentSave);
-            Analysis.ProcessAnalyses(this, project, errors);
-            SetProject(project);
+            using (RenderingUtils.ShowWaitCursor()) {
+                Project project = Project.ReadFromFile(path, errors, Preferences.Instance.useMostRecentSave);
+                Analysis.ProcessAnalyses(this, project, errors);
+                SetProject(project);
+            }
         }
         catch (Exception ex) {
             errors.Exception(ex, LSs.ErrorCriticalLoadingException, ErrorSeverity.Important);
